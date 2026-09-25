@@ -1,24 +1,29 @@
 import runpod
-import time  
-import torchaudio 
+import time
+import torchaudio
 import yt_dlp
 import os
 import tempfile
 import base64
 import time
-from chatterbox.tts import ChatterboxTTS
+from chatterbox.mtl_tts import ChatterboxMultilingualTTS, SUPPORTED_LANGUAGES
 from pathlib import Path
 
 model = None
 output_filename = "output.wav"
+DEFAULT_LANGUAGE = "pt"
 
 def handler(event, responseFormat="base64"):
-    input = event['input']    
-    prompt = input.get('prompt')  
-    yt_url = input.get('yt_url')  
+    input = event['input']
+    prompt = input.get('prompt')
+    yt_url = input.get('yt_url')
+    language_id = input.get('language', DEFAULT_LANGUAGE)
 
-    print(f"New request. Prompt: {prompt}")
-    
+    if language_id not in SUPPORTED_LANGUAGES:
+        return f"idioma nao suportado: {language_id}. Use um de: {sorted(SUPPORTED_LANGUAGES)}"
+
+    print(f"New request. Language: {language_id}. Prompt: {prompt}")
+
     try:
         # Download audio from YT, cut at 60s by default
         dl_info, wav_file = download_youtube_audio(yt_url, output_path="./my_audio", audio_format="wav")
@@ -26,7 +31,11 @@ def handler(event, responseFormat="base64"):
         # Prompt Chatterbox
         audio_tensor = model.generate(
             prompt,
-            audio_prompt_path=wav_file
+            language_id=language_id,
+            audio_prompt_path=wav_file,
+            exaggeration=float(input.get('exaggeration', 0.5)),
+            cfg_weight=float(input.get('cfg_weight', 0.5)),
+            temperature=float(input.get('temperature', 0.8)),
         )
 
         # Save as WAV
@@ -34,7 +43,7 @@ def handler(event, responseFormat="base64"):
 
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
-        return f"{e}" 
+        return f"{e}"
 
     # Convert to base64 string
     audio_base64 = audio_tensor_to_base64(audio_tensor, model.sr)
@@ -46,22 +55,23 @@ def handler(event, responseFormat="base64"):
             "audio_base64": audio_base64,
             "metadata": {
                 "sample_rate": model.sr,
-                "audio_shape": list(audio_tensor.shape)
+                "audio_shape": list(audio_tensor.shape),
+                "language": language_id
             }
         }
     elif responseFormat == "binary":
         with open(output_filename, 'rb') as f:
             audio_data = base64.b64encode(f.read()).decode('utf-8')
-        
+
         # Clean up the file
         os.remove(output_filename)
-        
+
         response = audio_data  # Just return the base64 string
 
     # Clean up temporary files
     os.remove(wav_file)
 
-    return response 
+    return response
 
 def audio_tensor_to_base64(audio_tensor, sample_rate):
     """Convert audio tensor to base64 encoded WAV data."""
@@ -69,17 +79,17 @@ def audio_tensor_to_base64(audio_tensor, sample_rate):
         # Save to temporary file
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
             torchaudio.save(tmp_file.name, audio_tensor, sample_rate)
-            
+
             # Read back as binary data
             with open(tmp_file.name, 'rb') as audio_file:
                 audio_data = audio_file.read()
-            
+
             # Clean up temporary file
             os.unlink(tmp_file.name)
-            
+
             # Encode as base64
             return base64.b64encode(audio_data).decode('utf-8')
-            
+
     except Exception as e:
         print(f"Error converting audio to base64: {e}")
         raise
@@ -87,31 +97,31 @@ def audio_tensor_to_base64(audio_tensor, sample_rate):
 
 def initialize_model():
     global model
-    
+
     if model is not None:
         print("Model already initialized")
         return model
-    
-    print("Initializing ChatterboxTTS model...")
-    model = ChatterboxTTS.from_pretrained(device="cuda")
+
+    print("Initializing ChatterboxMultilingualTTS model...")
+    model = ChatterboxMultilingualTTS.from_pretrained(device="cuda")
     print("Model initialized")
 
 def download_youtube_audio(url, output_path="./downloads", audio_format="mp3", duration_limit=60):
     """
     Download audio from a YouTube video
-    
+
     Args:
         url (str): YouTube video URL
         output_path (str): Directory to save the audio file
         audio_format (str): Audio format (mp3, wav, m4a, etc.)
-    
+
     Returns:
         str: Path to the downloaded audio file, or None if download failed
     """
-    
+
     # Create output directory if it doesn't exist
     Path(output_path).mkdir(parents=True, exist_ok=True)
-    
+
     # Configure yt-dlp options
     ydl_opts = {
         'format': 'bestaudio/best',  # Download best quality audio
@@ -135,7 +145,7 @@ def download_youtube_audio(url, output_path="./downloads", audio_format="mp3", d
         ydl_opts['postprocessor_args'].extend([
             '-t', str(duration_limit)  # Trim to specified duration
         ])
-    
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             # Get video info first
@@ -144,20 +154,20 @@ def download_youtube_audio(url, output_path="./downloads", audio_format="mp3", d
             print(f"Title: {info.get('title', 'Unknown')}")
             print(f"Duration: {info.get('duration', 'Unknown')} seconds")
             print(f"Uploader: {info.get('uploader', 'Unknown')}")
-        
+
             if duration_limit:
                 actual_duration = min(duration_limit, video_duration)
                 print(f"Downloading first {actual_duration} seconds")
-            
+
             # Download the audio
             print("Downloading audio...")
             ydl.download([url])
             print("Download completed successfully!")
 
             expected_filepath = os.path.join(output_path, f"output.{audio_format}")
-            
+
             return info, expected_filepath
-            
+
     except Exception as e:
         print(f"An error occurred: {str(e)}")
         return None
