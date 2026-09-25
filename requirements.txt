@@ -12,3 +12,4 @@ einops
 yt_dlp
 ffmpeg-python
 runpod>=1.7.7
+omegaconf
