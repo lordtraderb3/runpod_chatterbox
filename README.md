@@ -1,5 +1,16 @@
 # RunPod Serverless Endpoint for Voice Cloning 
 
+> **Fork com correcoes** (upstream: geronimi73/runpod_chatterbox)
+>
+> | Correcao | Motivo |
+> |---|---|
+> | Dockerfile pre-baixa o modelo com `device='cpu'` | A maquina de build do RunPod nao tem GPU; com `'cuda'` o build falha com exit code 1 |
+> | `omegaconf` adicionado ao `requirements.txt` | `chatterbox-tts` e instalado com `--no-deps` e a lista manual estava desatualizada; `omegaconf` e importado no nivel de modulo em `models/s3gen/flow.py` |
+> | Handler usa `ChatterboxMultilingualTTS` com `language_id` | O handler original usava `chatterbox.tts.ChatterboxTTS`, o modelo em **ingles**, e chamava `generate()` sem idioma. Texto em portugues saia com sotaque estrangeiro forte. O modelo multilingue suporta 23 idiomas e exige `language_id` |
+> | `language` aceito no input (padrao `pt`) | Permite escolher o idioma por requisicao |
+> | `exaggeration`, `cfg_weight`, `temperature` expostos no input | Ajuste fino da geracao sem rebuildar a imagem |
+
+
 ## Overview
 * REST API
 * Call Endpoint API with YouTube link and prompt
